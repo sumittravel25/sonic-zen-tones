@@ -1,5 +1,16 @@
-import React, { useState, useRef } from 'react';
-import { Play, Pause, Lock, Unlock, Zap, Heart, Wind, Brain, Volume2, Headphones, CheckCircle } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Play, Pause, Lock, Unlock, Zap, Heart, Wind, Brain, Volume2, Headphones, CheckCircle, User, LogOut } from 'lucide-react';
+import { useAuth } from '@/hooks/useAuth';
+import { useSubscription } from '@/hooks/useSubscription';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+
+declare global {
+  interface Window {
+    Razorpay: any;
+  }
+}
 
 interface Track {
   id: string;
@@ -19,13 +30,28 @@ const FrequencyApp = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTrack, setCurrentTrack] = useState<Track | null>(null);
   const [volume, setVolume] = useState(0.5);
-  const [isPremium, setIsPremium] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscRef1 = useRef<OscillatorNode | null>(null);
   const oscRef2 = useRef<OscillatorNode | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
+
+  const navigate = useNavigate();
+  const { user, signOut, loading: authLoading } = useAuth();
+  const { isPremium, loading: subLoading } = useSubscription();
+
+  // Load Razorpay script
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+    script.async = true;
+    document.body.appendChild(script);
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
 
   const tracks: Track[] = [
     {
@@ -111,6 +137,11 @@ const FrequencyApp = () => {
     stopAudio();
 
     if (track.isLocked && !isPremium) {
+      if (!user) {
+        toast.error('Please sign in to access premium features');
+        navigate('/auth');
+        return;
+      }
       setShowPaywall(true);
       return;
     }
@@ -176,11 +207,73 @@ const FrequencyApp = () => {
     }
   };
 
-  const handleSubscribe = () => {
-    setTimeout(() => {
-      setIsPremium(true);
-      setShowPaywall(false);
-    }, 1000);
+  const handleSubscribe = async () => {
+    if (!user) {
+      toast.error('Please sign in first');
+      navigate('/auth');
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      // Create Razorpay order
+      const { data, error } = await supabase.functions.invoke('create-razorpay-order', {
+        body: { amount: 49, currency: 'INR' },
+      });
+
+      if (error) throw error;
+
+      const options = {
+        key: data.keyId,
+        amount: data.amount,
+        currency: data.currency,
+        name: 'SonicTherapy.ai',
+        description: 'Premium Subscription - 30 Days',
+        order_id: data.orderId,
+        handler: async (response: any) => {
+          // Verify payment
+          const { error: verifyError } = await supabase.functions.invoke('verify-razorpay-payment', {
+            body: {
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_signature: response.razorpay_signature,
+              amount: 49,
+              user_id: user.id,
+            },
+          });
+
+          if (verifyError) {
+            toast.error('Payment verification failed');
+            return;
+          }
+
+          toast.success('Payment successful! You are now a premium member.');
+          setShowPaywall(false);
+          window.location.reload(); // Refresh to update subscription status
+        },
+        prefill: {
+          email: user.email,
+        },
+        theme: {
+          color: '#6366f1',
+        },
+      };
+
+      const razorpay = new window.Razorpay(options);
+      razorpay.open();
+    } catch (error: any) {
+      console.error('Payment error:', error);
+      toast.error('Failed to initiate payment');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    stopAudio();
+    await signOut();
+    toast.success('Signed out successfully');
   };
 
   return (
@@ -194,18 +287,43 @@ const FrequencyApp = () => {
           </div>
           <h1 className="text-xl font-bold tracking-tight">SonicTherapy<span className="text-indigo-400">.ai</span></h1>
         </div>
-        <div>
-          {!isPremium ? (
-            <button 
-              onClick={() => setShowPaywall(true)}
-              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 rounded-full text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-opacity shadow-lg shadow-orange-500/20"
-            >
-              Go Premium
-            </button>
+        <div className="flex items-center gap-3">
+          {!authLoading && user ? (
+            <>
+              <button 
+                onClick={() => navigate('/dashboard')}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm flex items-center gap-2 transition-colors"
+              >
+                <User size={16} />
+                <span className="hidden sm:inline">Dashboard</span>
+              </button>
+              {isPremium ? (
+                <span className="px-3 py-1 bg-slate-800 rounded-full text-xs font-medium text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
+                  <CheckCircle size={12} /> Premium
+                </span>
+              ) : (
+                <button 
+                  onClick={() => setShowPaywall(true)}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-orange-600 rounded-full text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-opacity shadow-lg shadow-orange-500/20"
+                >
+                  Go Premium
+                </button>
+              )}
+              <button 
+                onClick={handleSignOut}
+                className="p-2 hover:bg-slate-800 rounded-lg transition-colors"
+                title="Sign Out"
+              >
+                <LogOut size={18} />
+              </button>
+            </>
           ) : (
-            <span className="px-3 py-1 bg-slate-800 rounded-full text-xs font-medium text-emerald-400 border border-emerald-500/30 flex items-center gap-1">
-              <CheckCircle size={12} /> Premium Active
-            </span>
+            <button 
+              onClick={() => navigate('/auth')}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium transition-colors"
+            >
+              Sign In
+            </button>
           )}
         </div>
       </header>
@@ -362,13 +480,14 @@ const FrequencyApp = () => {
 
               <button 
                 onClick={handleSubscribe}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2"
+                disabled={isProcessing}
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <Unlock size={18} />
-                Start 7-Day Free Trial
+                {isProcessing ? 'Processing...' : 'Pay ₹49 for 30 Days'}
               </button>
               <p className="text-xs text-slate-500 mt-4">
-                Then INR. 49/month. Cancel anytime.
+                Secure payment via Razorpay. Cancel anytime.
               </p>
             </div>
           </div>
