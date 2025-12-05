@@ -40,7 +40,7 @@ serve(async (req) => {
         "Authorization": `Basic ${auth}`,
       },
       body: JSON.stringify({
-        amount: amount * 100, // Razorpay expects amount in paise
+        amount: currency === 'INR' ? amount * 100 : Math.round(amount * 100), // Razorpay expects smallest currency unit (paise/cents)
         currency,
         receipt: `receipt_${Date.now()}`,
       }),

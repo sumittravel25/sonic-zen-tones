@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Pause, Lock, Unlock, Zap, Heart, Wind, Brain, Volume2, Headphones, CheckCircle, User, LogOut } from 'lucide-react';
+import { Play, Pause, Lock, Unlock, Zap, Heart, Wind, Brain, Volume2, Headphones, CheckCircle, User, LogOut, Mail, Phone } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useSubscription } from '@/hooks/useSubscription';
 import { supabase } from '@/integrations/supabase/client';
@@ -32,6 +32,22 @@ const FrequencyApp = () => {
   const [volume, setVolume] = useState(0.5);
   const [showPaywall, setShowPaywall] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isIndia, setIsIndia] = useState(true);
+
+  // Detect user's country
+  useEffect(() => {
+    const detectCountry = async () => {
+      try {
+        const response = await fetch('https://ipapi.co/country/');
+        const country = await response.text();
+        setIsIndia(country.trim() === 'IN');
+      } catch (error) {
+        console.log('Could not detect country, defaulting to India');
+        setIsIndia(true);
+      }
+    };
+    detectCountry();
+  }, []);
 
   const audioCtxRef = useRef<AudioContext | null>(null);
   const oscRef1 = useRef<OscillatorNode | null>(null);
@@ -216,10 +232,13 @@ const FrequencyApp = () => {
 
     setIsProcessing(true);
 
+    const amount = isIndia ? 49 : 1.9;
+    const currency = isIndia ? 'INR' : 'USD';
+
     try {
       // Create Razorpay order
       const { data, error } = await supabase.functions.invoke('create-razorpay-order', {
-        body: { amount: 49, currency: 'INR' },
+        body: { amount, currency },
       });
 
       if (error) throw error;
@@ -228,7 +247,7 @@ const FrequencyApp = () => {
         key: data.keyId,
         amount: data.amount,
         currency: data.currency,
-        name: 'SonicTherapy.ai',
+        name: 'BEAT',
         description: 'Premium Subscription - 30 Days',
         order_id: data.orderId,
         handler: async (response: any) => {
@@ -238,7 +257,7 @@ const FrequencyApp = () => {
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_order_id: response.razorpay_order_id,
               razorpay_signature: response.razorpay_signature,
-              amount: 49,
+              amount,
               user_id: user.id,
             },
           });
@@ -285,7 +304,7 @@ const FrequencyApp = () => {
           <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center">
             <Volume2 size={16} />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">SonicTherapy<span className="text-indigo-400">.ai</span></h1>
+          <h1 className="text-xl font-bold tracking-tight">BEAT</h1>
         </div>
         <div className="flex items-center gap-3">
           {!authLoading && user ? (
@@ -400,6 +419,28 @@ const FrequencyApp = () => {
             );
           })}
         </div>
+        {/* Contact Section */}
+        <div className="mt-16 p-6 rounded-2xl bg-slate-800/40 border border-slate-700">
+          <h3 className="text-lg font-bold text-white mb-4">Contact Us</h3>
+          <div className="space-y-3">
+            <a 
+              href="mailto:ssingh2100.2100@gmail.com"
+              className="flex items-center gap-3 text-slate-300 hover:text-indigo-400 transition-colors"
+            >
+              <Mail size={18} className="text-indigo-400" />
+              <span>ssingh2100.2100@gmail.com</span>
+            </a>
+            <a 
+              href="https://wa.me/919439044619"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-3 text-slate-300 hover:text-indigo-400 transition-colors"
+            >
+              <Phone size={18} className="text-indigo-400" />
+              <span>+91-9439044619 (Call / WhatsApp)</span>
+            </a>
+          </div>
+        </div>
       </main>
 
       {/* Player Bar */}
@@ -484,7 +525,7 @@ const FrequencyApp = () => {
                 className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-colors shadow-lg shadow-indigo-500/25 flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <Unlock size={18} />
-                {isProcessing ? 'Processing...' : 'Pay ₹49 for 30 Days'}
+                {isProcessing ? 'Processing...' : isIndia ? 'Pay ₹49 for 30 Days' : 'Pay $1.9 for 30 Days'}
               </button>
               <p className="text-xs text-slate-500 mt-4">
                 Secure payment via Razorpay. Cancel anytime.
